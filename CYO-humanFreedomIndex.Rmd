@@ -1,0 +1,276 @@
+---
+title: "Capstone CYO HUMAN FREEDOM INDEX"
+author: "Stefan Reinhard"
+date: "5/30/2020"
+output:
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(ggcorrplot)) install.packages("ggcorrplot", repos = "http://cran.us.r-project.org")
+if(!require(pander)) install.packages("pander", repos = "http://cran.us.r-project.org")
+knitr::opts_chunk$set(echo = TRUE)
+load(".RData")
+```
+## Introduction and overview
+
+
+The Human Freedom Index (HFI) presents a broad measure of human freedom, understood as the absence of coercive constraint. The index is calculated by country on an a scale of 0 to 10, where 10 represents more freedom. Indicators are distinct between personal and economic freedom.
+
+The Human Freedom Index dataset is provided by kaggle <https://www.kaggle.com/gsutters/the-human-freedom-index> and CATO <https://www.cato.org>. For this project we use the the direct source from CATO, but the dataset are identical.
+
+The goal of this project is to determine the importance of variables in the dataset with a machine learning algorithms. The index uses 76 distinct indicators of personal and economic freedom, the indicator are grouped and weighted to in total 11 variables.
+
+
+
+Personal Freedom (50%)
+
+1. Rule of Law (12.5%)
+2. Security and Safety (12.5%)
+3. Movement (5%)
+4. Religion (5%)
+5. Association, Assembly, and Civil Society D. Expression and Information (5%)
+6. Identity and Relationships (5%)
+
+Economic Freedom (50%)
+
+7. Size of Government (10%)
+8. Legal System and Property Rights (10%)
+9. Sound Money (10%)
+10. Freedom to Trade Internationally (10%)
+11. Regulation (10%)
+
+To simplify, in this project we take the 11 indicators in account including their average by group (personal and economic freedom) and the overall score of the HFI (hf_score).
+The aim of this project is to compare the hf score with the predicted importance of the indicators. Therefore 4 linear models are calculated  and finally compared to the actual outcome of original score. With the new model winner and losers are shown and their shift visualized.
+Root mean squared error (RMSE) is defined as a loess function. RMSE is read as a standard deviation, a result of 1 leads to a error of 1 on the scale of 0 to 10. Preferably it shows the change of the model (RMSE) during the building process.
+$$ RMSE = \sqrt{\frac{1}{N}\displaystyle\sum_{u,i} (\hat{y}_{u,i}-y_{u,i})^{2}} $$
+First we do an exploratory data analysis to get to know the data. We focus on the outcome for 2017 and the grouped indicators. There are 136 listed countries with associated information (ISO, region), 11 indicators as mentioned, and 3 scores (hf_score, pf_score, ef_score).
+
+```{r overview2017, echo=TRUE}
+glimpse(data2017)
+```
+
+With focus on the distribution of the HF index, we see 2 peaks, one between 6.5 and 7 and another between 8 and 8.3.
+
+```{r overview2017-dist, echo=FALSE, out.width = '85%'}
+hist(data2017$hf_score, freq=TRUE, xlab="Index score", ylab="Count", main="Human Freedom Index 2017", col = c("gray"))
+```
+
+Now we want to see the correlation between the human freedom score and the personal respectively the economic freedom score. We expect a close to linear correlation.
+
+```{r overview2017-hf vs ef, echo=FALSE, message = FALSE, out.width = '90%'}
+#score distribution pf
+ggplot(data = data2017, aes(x = hf_score, y = pf_score)) + geom_point() + geom_smooth(method = "glm", se = TRUE) + ggtitle("pf over hf")
+```
+
+```{r overview2017-hf vs ef , echo=FALSE, message = FALSE, out.width = '90%'}
+#score distribution ef
+ggplot(data = data2017, aes(x = hf_score, y = ef_score)) + geom_point() + geom_smooth(method = "glm", se = TRUE) + ggtitle("pf over hf")
+```
+
+\newpage
+As we have seen the distribution of the score we check if the visual expectation is right and calculate the correlation.
+
+```{r overview2017-corr_all , echo=TRUE, message = FALSE}
+#correlation ef, pf, hf
+cor(data2017[, c(5,13,19)])
+```
+
+The correlation between hf and pf is 0.955, slightly higher than between hf and ef 0.895, but we expect it linear.
+
+Now we focus on the indicators, we see that indicators may lead to different correlation to each other, the indicator ef_government, which correlates more weakly than all other variables, is noticeable here. In general we don't see a difference between 2016 and 2017.
+
+```{r overview2017-2016-corr , echo=FALSE, message = FALSE, out.width = '50%'}
+#correlation all 2017 
+data_cor <- data2017[, c(5,13,19,6,7,8,9,10,11,12,14,15,16,17,18)]
+ggcorrplot(cor(data_cor), title = "correlation indicators 2017")
+
+#correlation all 2016 very similar
+data_cor <- data2016[, c(5,13,19,6,7,8,9,10,11,12,14,15,16,17,18)]
+ggcorrplot(cor(data_cor), title = "correlation indicators 2016")
+```
+
+That the variables are mostly not independent and start with the analysis of the prediction of the individual indicators.
+
+## Methods/analysis
+
+We start with the first simple model to predicted the score according the average of all variables regardless of their weighting. The equation is as follows.
+
+$$
+pred\_score_{i} = \frac{pf\_rol_{i} + pf\_ss_{i} + pf\_movement_{i} + ... + ef\_regulation_{i}}{11}
+$$
+
+The RMSE with all indicators based on the average is:
+
+```{r rsme_model1, echo = TRUE}
+rsme_model1 <- RMSE(model1$hf_score, model1$pred_score)
+rsme_model1
+```
+
+To improve the first model we predict the score according the CATO as seen on the overview of the first page. The equation is as follows.
+
+$$
+pred\_score_{i} = pf\_rol_{i}*0.125 + pf\_ss_{i}*0.125 + pf\_movement_{i}*0.05 + ... + ef\_regulation_{i}*0.01
+$$
+
+The RMSE with all indicators based on the weighted model 2 is:
+
+```{r rsme_model2, echo = TRUE , out.width = '90%'}
+rsme_model2 <- RMSE(model2$hf_score, model2$pred_score)
+rsme_model2
+```
+
+Model 2 has a lower RSME, what not surprising since we know the score is built this way.
+We compare now the hf_score and pred_score of top rated countries and it looks like the scores don't exactly match. 
+
+```{r rsme_model2_top, echo = FALSE}
+model2 %>%
+  filter(hf_score >= 8.5) %>%
+  select(hf_score, countries, hf_score, pred_score) %>% arrange(desc(hf_score))
+```
+
+For the next models, we calculate  a fit model to optain coefficients closer to the prediction based on the data of 2017. Therefore, in a first step the best matching data partition size is determined.
+
+```{r rsme_data partition, echo = FALSE,out.width = '90%'}
+plot(psize, rmses)
+```
+
+```{r rsme_data partition_winner, echo = TRUE}
+min(rmses)
+psize[which.min(rmses)]
+```
+
+The data partition is split to a train set 0.9 and the test set of 0.1. Now we calculate the fit model to obtain coefficients based on the data of 2017.
+
+```{r predicted_actual2017, echo = FALSE, message = FALSE}
+ggplot(data = results, aes(hf_score, pred_score)) +  geom_point() + geom_smooth(method = "glm", se = TRUE) + ggtitle("predicted scores vs. hf scores 2017")
+```
+
+The coefficients based on the fitted model are slightly different to the original.
+
+```{r coefficients2017, echo = FALSE}
+fit$coefficients
+```
+
+A third model with the coefficients of the fitted model is calculated according following equation.
+
+$$
+pred\_score_{i} = pf\_rol_{i}*coefficient_{pf\_rol} +  ... + ef\_regulation_{i}*coefficient_{ef\_regulation}
+$$
+\newpage
+The RMSE with all indicators and fitted coefficents based on the model 3 is:
+
+```{r rsme_model3, echo = TRUE}
+rsme_model3 <- RMSE(model3$hf_score, model3$pred_score)
+rsme_model3
+```
+
+We see a lower RSME for the model 3 compared tho the former models and the scores are closer the the original hf_score as expected.
+The top countries with predicted scores from model 3 are:
+
+```{r rsme_model3_top_countries, echo = FALSE}
+pander(model3 %>% filter(hf_score >= 8.5) %>% 
+  select(countries, hf_score, pred_score) %>%
+  arrange(desc(hf_score)), type = 'grid', caption = "hf_score compared to predicted score for the top countries")
+```
+
+For the final model we are going to repeat the steps on the full dataset. Now we calculate the fit model to obtain coefficients based on the data of 2017.
+
+```{r predicted_actual_full, echo = FALSE, message = FALSE,out.width = '85%'}
+ggplot(data = results_full, aes(hf_score, pred_score)) +  geom_point() + geom_smooth(method = "glm", se = TRUE) + ggtitle("predicted scores over hf scores")
+```
+
+The coefficents based on the fitted model are slightly different to the original.
+
+```{r coefficients_full, echo = FALSE}
+fit_full$coefficients
+```
+
+With the coefficents of the fitted model of all data, a forth model is calculate according following equation.
+
+$$
+pred\_score_{i} = pf\_rol_{i}*coefficient\_full_{pf\_rol} +  ... + ef\_regulation_{i}*coefficient\_full_{ef\_regulation}
+$$
+
+The RMSE with all indicators and fitted coefficents based on the model 4 is:
+
+```{r rsme_model4, echo = TRUE}
+rsme_model4 <- RMSE(model4$hf_score, model4$pred_score)
+rsme_model4
+```
+
+The RSME is slighlty higher compared to the third model and correlation between the predicted coefficients ant the actual score becomes lower.
+
+```{r cor_full, echo = TRUE}
+cor(p_weighting,hf_weighting, method="pearson")
+```
+
+\newpage
+## Resuls
+
+We have a model, that predicts the score based on coefficients predicted form the dataset. Following plot gives an overview of the changes to the weighting of the variables. We see the biggest different on pf_rol and ef_legal_gender, both are much higher ranked. Are we underestimate these variables?
+
+```{r weight_overview, echo = FALSE}
+#plot weight differences
+weights %>%  ggplot(aes( x = p_weighting,y= variables, color = "predicted")) + geom_point() + ggtitle("variables over weighting predicted") + geom_point(aes(size = diff_weighting)) + geom_point(aes( x = hf_weighting, colour = "hf index"))
+```
+
+The density of the scores is displayed in following plot, we see a small shift at the peaks.
+
+```{r difference, echo = FALSE,out.width = '72%'}
+#plot weight desnsity
+final_model %>% select(hf_score, pred_score) %>% gather(key=Type, value=Value) %>%  ggplot(aes(x=Value,fill=Type)) + geom_density(alpha = 0.5)
+```
+
+The countries with the biggest changes and their direction from the original score to the data optimized are the following.
+
+```{r difference_countries, echo = FALSE}
+# Countries with biggest change
+final_model %>% filter(year == "2017",  rank_diff < -2 | rank_diff > 2 )  %>%  ggplot(aes(x = rank_diff, y = countries, color = region)) + geom_point() + ggtitle("Rank difference between HF score and computed score") + xlab("rank different >2")
+```
+
+We see winner and loser countries with new model, the top winner with a increase of two or more ranks are the following.
+
+```{r countries_winner , echo=FALSE, message = FALSE}
+pander(head (final_model %>% filter(year == "2017", rank_diff >2) %>% select("countries","region", "rank_diff") %>% arrange(desc(rank_diff))), type = 'grid', caption = "Increase of number of countries with a difference of ranks by 2 or more between HFI coefficients and the fitted model")
+```
+
+\newpage
+These are the countries which lost freedom by two or more ranks acording the new model. 
+
+```{r countries_loser , echo=FALSE, message = FALSE}
+pander(head (final_model %>% filter(year == "2017",  rank_diff < -2) %>% select("countries","region", "rank_diff") %>% arrange(rank_diff)), type = 'grid', caption = "Decrease of number of countries with a difference of ranks by 2 or more between HFI coefficients and the fitted model")
+```
+
+The biggest winner regions with countries increased by 2 or more ranks are in the top table, contries with 2 or more ranss declined are at the bottom.
+
+```{r region_winner_loser , echo=FALSE, message = FALSE}
+pander(final_model %>% filter(year == "2017",  rank_diff > 2 ) %>% group_by(region) %>% summarise(count = n()) %>% arrange(desc(count)), type = 'grid', caption = "Increase of number of countries with a difference of ranks by 2 or more by region")
+pander(final_model %>% filter(year == "2017",  rank_diff < -2 ) %>% group_by(region) %>% summarise(count = n()) %>% arrange(count), type = 'grid', caption = "Decrease of number of countries with a difference of ranks by 2 or more between HFI by region")
+```
+
+For completeness all rmse for all models are as following.
+
+```{r all_rmse , echo=FALSE, message = FALSE}
+pander(rmse_results, type = 'grid', caption = "Model and RSME")
+```
+
+## Conclusion
+
+It is surprising that the hf_score cannot be derived from the indicators.With a general linear model we could predict more suitable coefficients from the data, the weighting does not correlate as strong as expected with the coefficients of the HFI.
+
+Why this shift occurs cannot be assessed, probably the importance of variables is not due to the data but to subjective evaluation, which may be closer to reality.
+
+## Appendix
+
+Environment
+```{r version , echo=FALSE, message = FALSE}
+version
+```
+
+## References
+
+Ian Vásquez and Tanja Porčnik, The Human Freedom Index 2018: A Global Measurement of Personal, Civil, and Economic Freedom (Washington: Cato Institute, Fraser Institute, and the Friedrich Naumann Foundation for Freedom, 2018).
